@@ -26,10 +26,11 @@ import androidx.annotation.DrawableRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.android.customization.module.logging.ThemesUserEventLogger
 import com.android.customization.picker.quickaffordance.domain.interactor.KeyguardQuickAffordancePickerInteractor
 import com.android.systemui.shared.keyguard.shared.model.KeyguardQuickAffordanceSlots
 import com.android.systemui.shared.quickaffordance.shared.model.KeyguardPreviewConstants
-import com.android.wallpaper.R
+import com.android.themepicker.R
 import com.android.wallpaper.module.CurrentWallpaperInfoFactory
 import com.android.wallpaper.module.CustomizationSections
 import com.android.wallpaper.picker.common.button.ui.viewmodel.ButtonStyle
@@ -63,6 +64,7 @@ private constructor(
     private val quickAffordanceInteractor: KeyguardQuickAffordancePickerInteractor,
     private val wallpaperInteractor: WallpaperInteractor,
     private val wallpaperInfoFactory: CurrentWallpaperInfoFactory,
+    private val logger: ThemesUserEventLogger,
 ) : ViewModel() {
 
     @SuppressLint("StaticFieldLeak") private val applicationContext = context.applicationContext
@@ -74,7 +76,7 @@ private constructor(
                     context = applicationContext,
                     authority =
                         applicationContext.getString(
-                            R.string.lock_screen_preview_provider_authority,
+                            com.android.wallpaper.R.string.lock_screen_preview_provider_authority,
                         ),
                 ),
             initialExtrasProvider = {
@@ -92,11 +94,11 @@ private constructor(
             wallpaperInfoProvider = { forceReload ->
                 suspendCancellableCoroutine { continuation ->
                     wallpaperInfoFactory.createCurrentWallpaperInfos(
-                        { homeWallpaper, lockWallpaper, _ ->
-                            continuation.resume(lockWallpaper ?: homeWallpaper, null)
-                        },
+                        context,
                         forceReload,
-                    )
+                    ) { homeWallpaper, lockWallpaper, _ ->
+                        continuation.resume(lockWallpaper ?: homeWallpaper, null)
+                    }
                 }
             },
             wallpaperInteractor = wallpaperInteractor,
@@ -158,7 +160,8 @@ private constructor(
                                         Icon.Loaded(
                                             drawable =
                                                 getAffordanceIcon(affordanceModel.iconResourceId),
-                                            contentDescription = null,
+                                            contentDescription =
+                                                Text.Loaded(getSlotContentDescription(slot.id)),
                                         ),
                                     text = Text.Loaded(affordanceModel.name),
                                     isSelected = MutableStateFlow(true) as StateFlow<Boolean>,
@@ -214,7 +217,13 @@ private constructor(
                             if (!isSelected) {
                                 {
                                     viewModelScope.launch {
-                                        quickAffordanceInteractor.unselectAll(selectedSlotId)
+                                        quickAffordanceInteractor.unselectAllFromSlot(
+                                            selectedSlotId
+                                        )
+                                        logger.logShortcutApplied(
+                                            shortcut = "none",
+                                            shortcutSlotId = selectedSlotId,
+                                        )
                                     }
                                 }
                             } else {
@@ -250,6 +259,10 @@ private constructor(
                                                     slotId = selectedSlotId,
                                                     affordanceId = affordance.id,
                                                 )
+                                                logger.logShortcutApplied(
+                                                    shortcut = affordance.id,
+                                                    shortcutSlotId = selectedSlotId,
+                                                )
                                             }
                                         }
                                     } else {
@@ -261,7 +274,7 @@ private constructor(
                                     showEnablementDialog(
                                         icon = affordanceIcon,
                                         name = affordance.name,
-                                        instructions = affordance.enablementInstructions,
+                                        explanation = affordance.enablementExplanation,
                                         actionText = affordance.enablementActionText,
                                         actionIntent = affordance.enablementActionIntent,
                                     )
@@ -346,7 +359,7 @@ private constructor(
     private fun showEnablementDialog(
         icon: Drawable,
         name: String,
-        instructions: List<String>,
+        explanation: String,
         actionText: String?,
         actionIntent: Intent?,
     ) {
@@ -358,39 +371,38 @@ private constructor(
                         contentDescription = null,
                     ),
                 headline = Text.Resource(R.string.keyguard_affordance_enablement_dialog_headline),
-                supportingText =
-                    Text.Loaded(
-                        applicationContext.getString(
-                            R.string.keyguard_affordance_enablement_dialog_title,
-                            name
-                        )
-                    ),
-                message =
-                    Text.Loaded(
-                        buildString {
-                            instructions.forEachIndexed { index, instruction ->
-                                if (index > 0) {
-                                    append('\n')
-                                }
-
-                                append(instruction)
-                            }
-                        }
-                    ),
+                message = Text.Loaded(explanation),
                 buttons =
-                    listOf(
-                        ButtonViewModel(
-                            text = actionText?.let { Text.Loaded(actionText) }
-                                    ?: Text.Resource(
-                                        R.string
-                                            .keyguard_affordance_enablement_dialog_dismiss_button,
+                    buildList {
+                        add(
+                            ButtonViewModel(
+                                text =
+                                    Text.Resource(
+                                        if (actionText != null) {
+                                            // This is not the only button on the dialog.
+                                            R.string.cancel
+                                        } else {
+                                            // This is the only button on the dialog.
+                                            R.string
+                                                .keyguard_affordance_enablement_dialog_dismiss_button
+                                        }
                                     ),
-                            style = ButtonStyle.Primary,
-                            onClicked = {
-                                actionIntent?.let { intent -> requestActivityStart(intent) }
-                            }
-                        ),
-                    ),
+                                style = ButtonStyle.Secondary,
+                            ),
+                        )
+
+                        if (actionText != null) {
+                            add(
+                                ButtonViewModel(
+                                    text = Text.Loaded(actionText),
+                                    style = ButtonStyle.Primary,
+                                    onClicked = {
+                                        actionIntent?.let { intent -> requestActivityStart(intent) }
+                                    }
+                                ),
+                            )
+                        }
+                    },
             )
     }
 
@@ -420,6 +432,18 @@ private constructor(
                 KeyguardQuickAffordanceSlots.SLOT_ID_BOTTOM_END ->
                     R.string.keyguard_slot_name_bottom_end
                 else -> error("No name for slot with ID of \"$slotId\"!")
+            }
+        )
+    }
+
+    private fun getSlotContentDescription(slotId: String): String {
+        return applicationContext.getString(
+            when (slotId) {
+                KeyguardQuickAffordanceSlots.SLOT_ID_BOTTOM_START ->
+                    R.string.keyguard_slot_name_bottom_start
+                KeyguardQuickAffordanceSlots.SLOT_ID_BOTTOM_END ->
+                    R.string.keyguard_slot_name_bottom_end
+                else -> error("No accessibility label for slot with ID \"$slotId\"!")
             }
         )
     }
@@ -464,6 +488,7 @@ private constructor(
         private val quickAffordanceInteractor: KeyguardQuickAffordancePickerInteractor,
         private val wallpaperInteractor: WallpaperInteractor,
         private val wallpaperInfoFactory: CurrentWallpaperInfoFactory,
+        private val logger: ThemesUserEventLogger,
     ) : ViewModelProvider.Factory {
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             @Suppress("UNCHECKED_CAST")
@@ -472,6 +497,7 @@ private constructor(
                 quickAffordanceInteractor = quickAffordanceInteractor,
                 wallpaperInteractor = wallpaperInteractor,
                 wallpaperInfoFactory = wallpaperInfoFactory,
+                logger = logger,
             )
                 as T
         }

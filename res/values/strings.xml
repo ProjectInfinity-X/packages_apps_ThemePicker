@@ -33,8 +33,11 @@
     <!-- The content description of clock entry. [CHAR LIMIT=NONE] -->
     <string name="clock_picker_entry_content_description">Change a custom clock</string>
 
+    <!-- action description for announcing selected Clock [CHAR LIMIT=NONE]-->
+    <string name="select_clock_action_description">Clock face option <xliff:g name="clock_face_description">%1$s</xliff:g></string>
+
     <!-- Title of a section of the customization picker where the user can configure Clock face. [CHAR LIMIT=19] -->
-    <string name="clock_settings_title">Clock Settings</string>
+    <string name="clock_settings_title">Clock color &amp; size</string>
 
     <!-- Title of a section of the customization picker where the user can configure clock color and size. [CHAR LIMIT=20] -->
     <string name="clock_color_and_size_title">Clock color &amp; size</string>
@@ -86,6 +89,9 @@
 
     <!-- Title of a radio button to apply clock size small. [CHAR LIMIT=15] -->
     <string name="clock_size_small">Small</string>
+
+    <!-- Description of a radio button to apply clock size small. [CHAR LIMIT=NONE] -->
+    <string name="clock_size_small_description">A small clock shows in the corner of your screen</string>
 
     <!-- Title of a section of the customization picker where the user can select a Grid size for
         the home screen. [CHAR LIMIT=15] -->
@@ -171,6 +177,15 @@
 
     <!--Title for a grid option, describing the number of columns and rows, eg: 4x4 [CHAR LIMIT=10] -->
     <string name="grid_title_pattern"><xliff:g name="num_cols" example="1">%1$d</xliff:g>x<xliff:g name="num_rows" example="1">%2$d</xliff:g></string>
+
+    <!-- Label of what will happen when user tap on apply button to change grid. [CHAR LIMIT=50] -->
+    <string name="apply_grid_btn_note">Changing grid size will reload workspace and may take a few seconds.</string>
+
+    <!-- Toast of reloading workspace with new grid. -->
+    <string name="toast_of_changing_grid">Reloading workspace with %1$s grid</string>
+
+    <!-- Toast of failure to reload workspace with new grid. -->
+    <string name="toast_of_failure_to_change_grid">Failed to reload workspace with %1$s grid</string>
 
     <!-- Message shown when a theme has been applied successfully in the system [CHAR LIMIT=NONE] -->
     <string name="applied_theme_msg">Style set successfully</string>
@@ -288,6 +303,9 @@
     <!-- Accessibility for custom style name page [CHAR_LIMIT=50] -->
     <string name="accessibility_custom_name_title">Custom style name</string>
 
+    <!-- Accessibility for clock color slider [CHAR_LIMIT=50] -->
+    <string name="accessibility_clock_slider_description">Color intensity</string>
+
     <!--Name of metadata in the main launcher Activity which values contains the authority
     corresponding to a ContentProvider in launcher to query or change themed icon option  -->
     <string name="themed_icon_metadata_key" translatable="false">com.android.launcher3.themedicon.option</string>
@@ -360,14 +378,7 @@
     enabled. The dialog contains a list of instructions that the user needs to take in order to
     enable the option before it can be selected again. [CHAR LIMIT=NONE].
     -->
-    <string name="keyguard_affordance_enablement_dialog_headline">Shortcut unavailable</string>
-
-    <!--
-    Supporting text for a popup dialog shown when the user attempts to select an option that is not
-    currently enabled. The dialog contains a list of instructions that the user needs to take in
-    order to enable the option before it can be selected again. [CHAR LIMIT=NONE].
-    -->
-    <string name="keyguard_affordance_enablement_dialog_title">To select `<xliff:g id="appName" example="Wallet">%1$s</xliff:g>` check the following</string>
+    <string name="keyguard_affordance_enablement_dialog_headline">Can\'t add shortcut</string>
 
     <!--
     Template for an action that opens a specific app. [CHAR LIMIT=16]
@@ -426,15 +437,6 @@
     [CHAR LIMIT=64].
     -->
     <string name="show_notifications_on_lock_screen">Show notifications on the lock screen</string>
-
-    <!--
-    Summary for a setting that lets the user toggle between showing or hiding notifications on their
-    device's lock screen. This one is shown when the user is not allowing notifications to show on
-    their device's lock screen.
-
-    [CHAR LIMIT=64].
-    -->
-    <string name="hide_notifications_on_lock_screen">Hide notifications on the lock screen</string>
 
     <!--
     Title for a section in a list of sections in the settings app that allows the user to access
@@ -511,4 +513,22 @@
     [CHAR LIMIT=NONE].
     -->
     <string name="content_description_color_option">Color option <xliff:g name="color_number" example="1">%1$d</xliff:g></string>
+
+    <!--
+    Accessibility label for forward scrolling in the carousel of clock faces.
+    [CHAR LIMIT=128].
+    -->
+    <string name="scroll_forward_and_select">Swipe left to choose a different clock face</string>
+
+    <!--
+    Accessibility label for backward scrolling in the carousel of clock faces.
+    [CHAR LIMIT=128].
+    -->
+    <string name="scroll_backward_and_select">Swipe right to choose a different clock face</string>
+
+    <!--
+    Accessibility label for the carousel of clock faces.
+    [CHAR LIMIT=128].
+    -->
+    <string name="custom_clocks_label">Custom Clocks</string>
 </resources>

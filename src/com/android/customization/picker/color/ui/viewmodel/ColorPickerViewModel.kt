@@ -21,20 +21,19 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.android.customization.model.color.ColorOptionImpl
+import com.android.customization.module.logging.ThemesUserEventLogger
 import com.android.customization.picker.color.domain.interactor.ColorPickerInteractor
 import com.android.customization.picker.color.shared.model.ColorType
-import com.android.wallpaper.R
+import com.android.themepicker.R
 import com.android.wallpaper.picker.common.text.ui.viewmodel.Text
 import com.android.wallpaper.picker.option.ui.viewmodel.OptionItemViewModel
 import kotlin.math.max
 import kotlin.math.min
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -43,6 +42,7 @@ class ColorPickerViewModel
 private constructor(
     context: Context,
     private val interactor: ColorPickerInteractor,
+    private val logger: ThemesUserEventLogger,
 ) : ViewModel() {
 
     private val selectedColorTypeTabId = MutableStateFlow<ColorType?>(null)
@@ -105,7 +105,7 @@ private constructor(
                             val darkThemeColors =
                                 colorOption.previewInfo.resolveColors(/* darkTheme= */ true)
                             val isSelectedFlow: StateFlow<Boolean> =
-                                interactor.activeColorOption
+                                interactor.selectingColorOption
                                     .map {
                                         it?.colorOption?.isEquivalent(colorOptionModel.colorOption)
                                             ?: colorOptionModel.isSelected
@@ -138,6 +138,14 @@ private constructor(
                                             {
                                                 viewModelScope.launch {
                                                     interactor.select(colorOptionModel)
+                                                    logger.logThemeColorApplied(
+                                                        colorOptionModel.colorOption
+                                                            .sourceForLogging,
+                                                        colorOptionModel.colorOption
+                                                            .styleForLogging,
+                                                        colorOptionModel.colorOption
+                                                            .seedColorForLogging,
+                                                    )
                                                 }
                                             }
                                         }
@@ -151,57 +159,43 @@ private constructor(
     /** The list of all available color options for the selected Color Type. */
     val colorOptions: Flow<List<OptionItemViewModel<ColorOptionIconViewModel>>> =
         combine(allColorOptions, selectedColorTypeTabId) {
-                allColorOptions:
-                    Map<ColorType, List<OptionItemViewModel<ColorOptionIconViewModel>>>,
-                selectedColorTypeIdOrNull ->
-                val selectedColorTypeId = selectedColorTypeIdOrNull ?: ColorType.WALLPAPER_COLOR
-                allColorOptions[selectedColorTypeId]!!
-            }
-            .shareIn(
-                scope = viewModelScope,
-                started = SharingStarted.WhileSubscribed(),
-                replay = 1,
-            )
+            allColorOptions: Map<ColorType, List<OptionItemViewModel<ColorOptionIconViewModel>>>,
+            selectedColorTypeIdOrNull ->
+            val selectedColorTypeId = selectedColorTypeIdOrNull ?: ColorType.WALLPAPER_COLOR
+            allColorOptions[selectedColorTypeId]!!
+        }
 
     /** The list of color options for the color section */
     val colorSectionOptions: Flow<List<OptionItemViewModel<ColorOptionIconViewModel>>> =
-        allColorOptions
-            .map { allColorOptions ->
-                val wallpaperOptions = allColorOptions[ColorType.WALLPAPER_COLOR]
-                val presetOptions = allColorOptions[ColorType.PRESET_COLOR]
-                val subOptions =
-                    wallpaperOptions!!.subList(
-                        0,
-                        min(COLOR_SECTION_OPTION_SIZE, wallpaperOptions.size)
+        allColorOptions.map { allColorOptions ->
+            val wallpaperOptions = allColorOptions[ColorType.WALLPAPER_COLOR]
+            val presetOptions = allColorOptions[ColorType.PRESET_COLOR]
+            val subOptions =
+                wallpaperOptions!!.subList(0, min(COLOR_SECTION_OPTION_SIZE, wallpaperOptions.size))
+            // Add additional options based on preset colors if size of wallpaper color options is
+            // less than COLOR_SECTION_OPTION_SIZE
+            val additionalSubOptions =
+                presetOptions!!.subList(
+                    0,
+                    min(
+                        max(0, COLOR_SECTION_OPTION_SIZE - wallpaperOptions.size),
+                        presetOptions.size,
                     )
-                // Add additional options based on preset colors if size of wallpaper color options
-                // is
-                // less than COLOR_SECTION_OPTION_SIZE
-                val additionalSubOptions =
-                    presetOptions!!.subList(
-                        0,
-                        min(
-                            max(0, COLOR_SECTION_OPTION_SIZE - wallpaperOptions.size),
-                            presetOptions.size,
-                        )
-                    )
-                subOptions + additionalSubOptions
-            }
-            .shareIn(
-                scope = viewModelScope,
-                started = SharingStarted.WhileSubscribed(),
-                replay = 1,
-            )
+                )
+            subOptions + additionalSubOptions
+        }
 
     class Factory(
         private val context: Context,
         private val interactor: ColorPickerInteractor,
+        private val logger: ThemesUserEventLogger,
     ) : ViewModelProvider.Factory {
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             @Suppress("UNCHECKED_CAST")
             return ColorPickerViewModel(
                 context = context,
                 interactor = interactor,
+                logger = logger,
             )
                 as T
         }

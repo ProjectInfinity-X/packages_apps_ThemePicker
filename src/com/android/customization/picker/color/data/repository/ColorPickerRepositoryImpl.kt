@@ -16,7 +16,6 @@
  */
 package com.android.customization.picker.color.data.repository
 
-import android.app.WallpaperColors
 import android.util.Log
 import com.android.customization.model.CustomizationManager
 import com.android.customization.model.color.ColorCustomizationManager
@@ -25,9 +24,12 @@ import com.android.customization.model.color.ColorOptionImpl
 import com.android.customization.picker.color.shared.model.ColorOptionModel
 import com.android.customization.picker.color.shared.model.ColorType
 import com.android.systemui.monet.Style
-import com.android.wallpaper.model.WallpaperColorsViewModel
+import com.android.wallpaper.picker.customization.data.repository.WallpaperColorsRepository
+import com.android.wallpaper.picker.customization.shared.model.WallpaperColorsModel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -35,23 +37,48 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 // TODO (b/262924623): refactor to remove dependency on ColorCustomizationManager & ColorOption
 // TODO (b/268203200): Create test for ColorPickerRepositoryImpl
 class ColorPickerRepositoryImpl(
-    wallpaperColorsViewModel: WallpaperColorsViewModel,
+    wallpaperColorsRepository: WallpaperColorsRepository,
     private val colorManager: ColorCustomizationManager,
 ) : ColorPickerRepository {
 
-    private val homeWallpaperColors: StateFlow<WallpaperColors?> =
-        wallpaperColorsViewModel.homeWallpaperColors
-    private val lockWallpaperColors: StateFlow<WallpaperColors?> =
-        wallpaperColorsViewModel.lockWallpaperColors
+    private val homeWallpaperColors: StateFlow<WallpaperColorsModel?> =
+        wallpaperColorsRepository.homeWallpaperColors
+    private val lockWallpaperColors: StateFlow<WallpaperColorsModel?> =
+        wallpaperColorsRepository.lockWallpaperColors
+    private var selectedColorOption: MutableStateFlow<ColorOptionModel> =
+        MutableStateFlow(getCurrentColorOption())
 
+    private val _isApplyingSystemColor = MutableStateFlow(false)
+    override val isApplyingSystemColor = _isApplyingSystemColor.asStateFlow()
+
+    // TODO (b/299510645): update color options on selected option change after restart is disabled
     override val colorOptions: Flow<Map<ColorType, List<ColorOptionModel>>> =
         combine(homeWallpaperColors, lockWallpaperColors) { homeColors, lockColors ->
                 homeColors to lockColors
             }
             .map { (homeColors, lockColors) ->
                 suspendCancellableCoroutine { continuation ->
-                    colorManager.setWallpaperColors(homeColors, lockColors)
-                    colorManager.fetchRevampedUIOptions(
+                    if (
+                        homeColors is WallpaperColorsModel.Loading ||
+                            lockColors is WallpaperColorsModel.Loading
+                    ) {
+                        continuation.resumeWith(
+                            Result.success(
+                                mapOf(
+                                    ColorType.WALLPAPER_COLOR to listOf(),
+                                    ColorType.PRESET_COLOR to listOf()
+                                )
+                            )
+                        )
+                        return@suspendCancellableCoroutine
+                    }
+                    val homeColorsLoaded = homeColors as WallpaperColorsModel.Loaded
+                    val lockColorsLoaded = lockColors as WallpaperColorsModel.Loaded
+                    colorManager.setWallpaperColors(
+                        homeColorsLoaded.colors,
+                        lockColorsLoaded.colors
+                    )
+                    colorManager.fetchOptions(
                         object : CustomizationManager.OptionsFetchedListener<ColorOption?> {
                             override fun onOptionsLoaded(options: MutableList<ColorOption?>?) {
                                 val wallpaperColorOptions: MutableList<ColorOptionModel> =
@@ -90,17 +117,21 @@ class ColorPickerRepositoryImpl(
                 }
             }
 
-    override suspend fun select(colorOptionModel: ColorOptionModel) =
+    override suspend fun select(colorOptionModel: ColorOptionModel) {
+        _isApplyingSystemColor.value = true
         suspendCancellableCoroutine { continuation ->
             colorManager.apply(
                 colorOptionModel.colorOption,
                 object : CustomizationManager.Callback {
                     override fun onSuccess() {
+                        _isApplyingSystemColor.value = false
+                        selectedColorOption.value = colorOptionModel
                         continuation.resumeWith(Result.success(Unit))
                     }
 
                     override fun onError(throwable: Throwable?) {
                         Log.w(TAG, "Apply theme with error", throwable)
+                        _isApplyingSystemColor.value = false
                         continuation.resumeWith(
                             Result.failure(throwable ?: Throwable("Error loading theme bundles"))
                         )
@@ -108,6 +139,7 @@ class ColorPickerRepositoryImpl(
                 }
             )
         }
+    }
 
     override fun getCurrentColorOption(): ColorOptionModel {
         val overlays = colorManager.currentOverlays

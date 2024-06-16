@@ -19,8 +19,6 @@ import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Context
 import android.view.LayoutInflater
-import androidx.lifecycle.DefaultLifecycleObserver
-import androidx.lifecycle.LifecycleOwner
 import com.android.systemui.plugins.Plugin
 import com.android.systemui.plugins.PluginManager
 import com.android.systemui.shared.clocks.ClockRegistry
@@ -31,6 +29,7 @@ import com.android.systemui.shared.plugins.PluginInstance
 import com.android.systemui.shared.plugins.PluginManagerImpl
 import com.android.systemui.shared.plugins.PluginPrefs
 import com.android.systemui.shared.system.UncaughtExceptionPreHandlerManager_Factory
+import com.android.wallpaper.module.InjectorProvider
 import java.util.concurrent.Executors
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -45,49 +44,29 @@ class ClockRegistryProvider(
     private val mainDispatcher: CoroutineDispatcher,
     private val backgroundDispatcher: CoroutineDispatcher,
 ) {
-    private val lifecycleOwners = mutableSetOf<Int>()
-    private val pluginManager: PluginManager by lazy { createPluginManager(context) }
     private val clockRegistry: ClockRegistry by lazy {
         ClockRegistry(
-                context,
-                pluginManager,
-                coroutineScope,
-                mainDispatcher,
-                backgroundDispatcher,
-                isEnabled = true,
-                handleAllUsers = false,
-                DefaultClockProvider(context, LayoutInflater.from(context), context.resources),
-                keepAllLoaded = true,
-                subTag = "Picker",
-            )
-            .apply { registerListeners() }
-    }
-
-    fun getForOwner(lifecycleOwner: LifecycleOwner): ClockRegistry {
-        registerLifecycleOwner(lifecycleOwner)
-        return clockRegistry
-    }
-
-    private fun registerLifecycleOwner(lifecycleOwner: LifecycleOwner) {
-        lifecycleOwners.add(lifecycleOwner.hashCode())
-
-        lifecycleOwner.lifecycle.addObserver(
-            object : DefaultLifecycleObserver {
-                override fun onDestroy(owner: LifecycleOwner) {
-                    super.onDestroy(owner)
-                    unregisterLifecycleOwner(owner)
-                }
-            }
+            context,
+            createPluginManager(context),
+            coroutineScope,
+            mainDispatcher,
+            backgroundDispatcher,
+            isEnabled = true,
+            handleAllUsers = false,
+            DefaultClockProvider(context, LayoutInflater.from(context), context.resources),
+            keepAllLoaded = true,
+            subTag = "Picker",
+            isTransitClockEnabled =
+                InjectorProvider.getInjector().getFlags().isTransitClockEnabled(context)
         )
     }
 
-    private fun unregisterLifecycleOwner(lifecycleOwner: LifecycleOwner) {
-        lifecycleOwners.remove(lifecycleOwner.hashCode())
-
-        if (lifecycleOwners.isEmpty()) {
-            clockRegistry.unregisterListeners()
-        }
+    init {
+        // Listeners in ClockRegistry get cleaned up when app ended
+        clockRegistry.registerListeners()
     }
+
+    fun get() = clockRegistry
 
     private fun createPluginManager(context: Context): PluginManager {
         val privilegedPlugins = listOf<String>()

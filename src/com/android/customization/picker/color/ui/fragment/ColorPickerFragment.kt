@@ -15,27 +15,38 @@
  */
 package com.android.customization.picker.color.ui.fragment
 
+import android.app.WallpaperManager
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.cardview.widget.CardView
+import androidx.core.content.ContextCompat
+import androidx.core.view.isVisible
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.get
+import androidx.lifecycle.lifecycleScope
+import androidx.transition.Transition
+import androidx.transition.doOnStart
 import com.android.customization.model.mode.DarkModeSectionController
 import com.android.customization.module.ThemePickerInjector
 import com.android.customization.picker.color.ui.binder.ColorPickerBinder
-import com.android.wallpaper.R
+import com.android.themepicker.R
 import com.android.wallpaper.module.CustomizationSections
 import com.android.wallpaper.module.InjectorProvider
 import com.android.wallpaper.picker.AppbarFragment
+import com.android.wallpaper.picker.customization.data.repository.WallpaperColorsRepository
+import com.android.wallpaper.picker.customization.shared.model.WallpaperColorsModel
 import com.android.wallpaper.picker.customization.ui.binder.ScreenPreviewBinder
 import com.android.wallpaper.picker.customization.ui.viewmodel.ScreenPreviewViewModel
 import com.android.wallpaper.util.DisplayUtils
 import com.android.wallpaper.util.PreviewUtils
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ColorPickerFragment : AppbarFragment() {
@@ -65,7 +76,8 @@ class ColorPickerFragment : AppbarFragment() {
         val homeScreenView: CardView = view.requireViewById(R.id.home_preview)
         val wallpaperInfoFactory = injector.getCurrentWallpaperInfoFactory(requireContext())
         val displayUtils: DisplayUtils = injector.getDisplayUtils(requireContext())
-        val wcViewModel = injector.getWallpaperColorsViewModel()
+        val wallpaperColorsRepository = injector.getWallpaperColorsRepository()
+        val wallpaperManager = WallpaperManager.getInstance(requireContext())
 
         binding =
             ColorPickerBinder.bind(
@@ -75,7 +87,7 @@ class ColorPickerFragment : AppbarFragment() {
                             requireActivity(),
                             injector.getColorPickerViewModelFactory(
                                 context = requireContext(),
-                                wallpaperColorsViewModel = wcViewModel,
+                                wallpaperColorsRepository = wallpaperColorsRepository,
                             ),
                         )
                         .get(),
@@ -84,41 +96,59 @@ class ColorPickerFragment : AppbarFragment() {
 
         savedInstanceState?.let { binding?.restoreInstanceState(it) }
 
-        ScreenPreviewBinder.bind(
-            activity = requireActivity(),
-            previewView = lockScreenView,
-            viewModel =
-                ScreenPreviewViewModel(
-                    previewUtils =
-                        PreviewUtils(
-                            context = requireContext(),
-                            authority =
-                                requireContext()
-                                    .getString(
-                                        R.string.lock_screen_preview_provider_authority,
-                                    ),
-                        ),
-                    wallpaperInfoProvider = { forceReload ->
-                        suspendCancellableCoroutine { continuation ->
-                            wallpaperInfoFactory.createCurrentWallpaperInfos(
-                                { homeWallpaper, lockWallpaper, _ ->
+        val lockScreenPreviewBinder =
+            ScreenPreviewBinder.bind(
+                activity = requireActivity(),
+                previewView = lockScreenView,
+                viewModel =
+                    ScreenPreviewViewModel(
+                        previewUtils =
+                            PreviewUtils(
+                                context = requireContext(),
+                                authority =
+                                    requireContext()
+                                        .getString(
+                                            com.android.wallpaper.R.string
+                                                .lock_screen_preview_provider_authority,
+                                        ),
+                            ),
+                        wallpaperInfoProvider = { forceReload ->
+                            suspendCancellableCoroutine { continuation ->
+                                wallpaperInfoFactory.createCurrentWallpaperInfos(
+                                    context,
+                                    forceReload,
+                                ) { homeWallpaper, lockWallpaper, _ ->
+                                    lifecycleScope.launch {
+                                        if (
+                                            wallpaperColorsRepository.lockWallpaperColors.value
+                                                is WallpaperColorsModel.Loading
+                                        ) {
+                                            loadInitialColors(
+                                                wallpaperManager,
+                                                wallpaperColorsRepository,
+                                                CustomizationSections.Screen.LOCK_SCREEN
+                                            )
+                                        }
+                                    }
                                     continuation.resume(lockWallpaper ?: homeWallpaper, null)
-                                },
-                                forceReload,
-                            )
-                        }
-                    },
-                    onWallpaperColorChanged = { colors ->
-                        wcViewModel.setLockWallpaperColors(colors)
-                    },
-                    wallpaperInteractor = injector.getWallpaperInteractor(requireContext()),
-                    screen = CustomizationSections.Screen.LOCK_SCREEN,
-                ),
-            lifecycleOwner = this,
-            offsetToStart =
-                displayUtils.isSingleDisplayOrUnfoldedHorizontalHinge(requireActivity()),
-            onWallpaperPreviewDirty = { activity?.recreate() },
-        )
+                                }
+                            }
+                        },
+                        onWallpaperColorChanged = { colors ->
+                            wallpaperColorsRepository.setLockWallpaperColors(colors)
+                        },
+                        wallpaperInteractor = injector.getWallpaperInteractor(requireContext()),
+                        screen = CustomizationSections.Screen.LOCK_SCREEN,
+                    ),
+                lifecycleOwner = this,
+                offsetToStart =
+                    displayUtils.isSingleDisplayOrUnfoldedHorizontalHinge(requireActivity()),
+                onWallpaperPreviewDirty = { activity?.recreate() },
+            )
+        val shouldMirrorHomePreview =
+            wallpaperManager.getWallpaperInfo(WallpaperManager.FLAG_SYSTEM) != null &&
+                wallpaperManager.getWallpaperId(WallpaperManager.FLAG_LOCK) < 0
+        val mirrorSurface = if (shouldMirrorHomePreview) lockScreenPreviewBinder.surface() else null
         ScreenPreviewBinder.bind(
             activity = requireActivity(),
             previewView = homeScreenView,
@@ -130,21 +160,33 @@ class ColorPickerFragment : AppbarFragment() {
                             authorityMetadataKey =
                                 requireContext()
                                     .getString(
-                                        R.string.grid_control_metadata_name,
+                                        com.android.wallpaper.R.string.grid_control_metadata_name,
                                     ),
                         ),
                     wallpaperInfoProvider = { forceReload ->
                         suspendCancellableCoroutine { continuation ->
                             wallpaperInfoFactory.createCurrentWallpaperInfos(
-                                { homeWallpaper, lockWallpaper, _ ->
-                                    continuation.resume(homeWallpaper ?: lockWallpaper, null)
-                                },
+                                context,
                                 forceReload,
-                            )
+                            ) { homeWallpaper, lockWallpaper, _ ->
+                                lifecycleScope.launch {
+                                    if (
+                                        wallpaperColorsRepository.homeWallpaperColors.value
+                                            is WallpaperColorsModel.Loading
+                                    ) {
+                                        loadInitialColors(
+                                            wallpaperManager,
+                                            wallpaperColorsRepository,
+                                            CustomizationSections.Screen.HOME_SCREEN
+                                        )
+                                    }
+                                }
+                                continuation.resume(homeWallpaper ?: lockWallpaper, null)
+                            }
                         }
                     },
                     onWallpaperColorChanged = { colors ->
-                        wcViewModel.setLockWallpaperColors(colors)
+                        wallpaperColorsRepository.setHomeWallpaperColors(colors)
                     },
                     wallpaperInteractor = injector.getWallpaperInteractor(requireContext()),
                     screen = CustomizationSections.Screen.HOME_SCREEN,
@@ -153,6 +195,7 @@ class ColorPickerFragment : AppbarFragment() {
             offsetToStart =
                 displayUtils.isSingleDisplayOrUnfoldedHorizontalHinge(requireActivity()),
             onWallpaperPreviewDirty = { activity?.recreate() },
+            mirrorSurface = mirrorSurface,
         )
         val darkModeToggleContainerView: FrameLayout =
             view.requireViewById(R.id.dark_mode_toggle_container)
@@ -160,12 +203,43 @@ class ColorPickerFragment : AppbarFragment() {
             DarkModeSectionController(
                     context,
                     lifecycle,
-                    injector.getDarkModeSnapshotRestorer(requireContext())
+                    injector.getDarkModeSnapshotRestorer(requireContext()),
+                    injector.getUserEventLogger(),
                 )
                 .createView(requireContext())
         darkModeSectionView.background = null
         darkModeToggleContainerView.addView(darkModeSectionView)
+
+        (returnTransition as? Transition)?.doOnStart {
+            lockScreenView.isVisible = false
+            homeScreenView.isVisible = false
+        }
+
         return view
+    }
+
+    private suspend fun loadInitialColors(
+        wallpaperManager: WallpaperManager,
+        colorViewModel: WallpaperColorsRepository,
+        screen: CustomizationSections.Screen,
+    ) {
+        withContext(Dispatchers.IO) {
+            val colors =
+                wallpaperManager.getWallpaperColors(
+                    if (screen == CustomizationSections.Screen.LOCK_SCREEN) {
+                        WallpaperManager.FLAG_LOCK
+                    } else {
+                        WallpaperManager.FLAG_SYSTEM
+                    }
+                )
+            withContext(Dispatchers.Main) {
+                if (screen == CustomizationSections.Screen.LOCK_SCREEN) {
+                    colorViewModel.setLockWallpaperColors(colors)
+                } else {
+                    colorViewModel.setHomeWallpaperColors(colors)
+                }
+            }
+        }
     }
 
     override fun onSaveInstanceState(savedInstanceState: Bundle) {
@@ -179,5 +253,12 @@ class ColorPickerFragment : AppbarFragment() {
 
     override fun getToolbarColorId(): Int {
         return android.R.color.transparent
+    }
+
+    override fun getToolbarTextColor(): Int {
+        return ContextCompat.getColor(
+            requireContext(),
+            com.android.wallpaper.R.color.system_on_surface
+        )
     }
 }
